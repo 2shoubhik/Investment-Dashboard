@@ -338,8 +338,16 @@ with st.sidebar:
         "Built with Streamlit & Plotly</small>", unsafe_allow_html=True
     )
 
+    st.markdown("---")
+    st.markdown("### 👤 About")
+    st.markdown(
+    "<small style='color:#a0aec0;'>Personal portfolio tracker built to monitor "
+    "My watchlist of US and Canadian equities with a focus on risk-adjusted returns and retail sentiment.</small>",
+    unsafe_allow_html=True
+)
+
 # ─── MAIN LAYOUT ─────────────────────────────────────────────────────────────────
-st.markdown("# 📈 Investment Dashboard")
+st.markdown("# Shoubhik's Investment Dashboard")
 st.markdown(f"<small style='color:#4a5568'>Last updated: {datetime.now().strftime('%b %d, %Y  %H:%M')}</small>", unsafe_allow_html=True)
 st.markdown("---")
 
