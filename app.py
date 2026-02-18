@@ -62,24 +62,47 @@ st.markdown("""
 
 # ─── CONSTANTS ──────────────────────────────────────────────────────────────────
 RISK_FREE_RATE = 0.045  # ~current 3-month T-bill rate
-DEFAULT_TICKERS = ["SNPS", "PLTR", "APP", "BTC-USD", "MFC", "NVDA", "VRT", "AAPL", "UNH", "NVO"]
+DEFAULT_TICKERS = ["APP", "PLTR", "NVDA", "SNPS", "BAM", "BRK-B"]
 PERIODS = {"1 Month": "1mo", "3 Months": "3mo", "6 Months": "6mo", "1 Year": "1y", "2 Years": "2y"}
 
 # ─── DATA FETCHING ───────────────────────────────────────────────────────────────
 @st.cache_data(ttl=300)  # cache for 5 minutes
 def fetch_price_history(tickers: list, period: str) -> pd.DataFrame:
-    """Fetch adjusted close prices for a list of tickers."""
-    try:
-        raw = yf.download(tickers, period=period, auto_adjust=True, progress=False)
-        if isinstance(raw.columns, pd.MultiIndex):
-            prices = raw["Close"]
-        else:
-            prices = raw[["Close"]]
-            prices.columns = tickers
-        return prices.dropna(how="all")
-    except Exception as e:
-        st.error(f"Error fetching price data: {e}")
-        return pd.DataFrame()
+    """Fetch adjusted close prices for a list of tickers with retry logic."""
+    import time
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            raw = yf.download(tickers, period=period, auto_adjust=True, progress=False, threads=False)
+            if isinstance(raw.columns, pd.MultiIndex):
+                prices = raw["Close"]
+            else:
+                prices = raw[["Close"]]
+                prices.columns = tickers
+            
+            # Drop completely empty columns (failed tickers)
+            prices = prices.dropna(axis=1, how='all')
+            
+            if prices.empty:
+                st.warning("⚠️ Could not fetch price data. Yahoo Finance may be rate limiting. Try again in a few minutes.")
+                return pd.DataFrame()
+            
+            return prices.dropna(how="all")
+            
+        except Exception as e:
+            if "Too Many Requests" in str(e) or "Rate" in str(e):
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)  # exponential backoff: 1s, 2s, 4s
+                    continue
+                else:
+                    st.warning("⚠️ Yahoo Finance rate limit reached. Try using fewer tickers or wait a few minutes.")
+                    return pd.DataFrame()
+            else:
+                st.error(f"Error fetching price data: {e}")
+                return pd.DataFrame()
+    
+    return pd.DataFrame()
 
 @st.cache_data(ttl=300)
 def fetch_ticker_info(ticker: str) -> dict:
@@ -99,6 +122,9 @@ def fetch_ticker_info(ticker: str) -> dict:
             "52w_low":      info.get("fiftyTwoWeekLow"),
             "currency":     info.get("currency", "USD"),
         }
+    except Exception:
+        # Silently return empty dict on rate limit or error
+        return {"name": ticker, "sector": "—"}
     except Exception:
         return {}
 
@@ -207,8 +233,6 @@ def compute_risk_metrics(prices: pd.DataFrame) -> pd.DataFrame:
 
 def compute_normalised_returns(prices: pd.DataFrame) -> pd.DataFrame:
     """Normalise prices to 100 at start for comparison."""
-    if prices.empty or len(prices) == 0:
-        return pd.DataFrame()
     return (prices / prices.iloc[0]) * 100
 
 # ─── CHART HELPERS ───────────────────────────────────────────────────────────────
@@ -315,7 +339,7 @@ with st.sidebar:
     )
 
 # ─── MAIN LAYOUT ─────────────────────────────────────────────────────────────────
-st.markdown("# Shoubhik's Investment Dashboard")
+st.markdown("# 📈 Investment Dashboard")
 st.markdown(f"<small style='color:#4a5568'>Last updated: {datetime.now().strftime('%b %d, %Y  %H:%M')}</small>", unsafe_allow_html=True)
 st.markdown("---")
 
@@ -370,11 +394,7 @@ with tab1:
 
     # Normalised price chart
     st.markdown('<div class="section-header">Price Performance (Indexed to 100)</div>', unsafe_allow_html=True)
-    prices_clean = prices.dropna()
-    if len(prices_clean) < 2:
-        st.warning("Not enough price data for the selected period. Try a longer time range.")
-        st.stop()
-    norm = compute_normalised_returns(prices_clean)
+    norm = compute_normalised_returns(prices.dropna())
 
     # Add benchmark if available
     if not bench_prices.empty:
